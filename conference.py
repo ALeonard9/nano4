@@ -35,6 +35,11 @@ from models import ConferenceForm
 from models import ConferenceForms
 from models import ConferenceQueryForm
 from models import ConferenceQueryForms
+from models import Session
+from models import SessionForm
+from models import SessionForms
+from models import SessionQueryForm
+from models import SessionQueryForms
 from models import TeeShirtSize
 
 from settings import WEB_CLIENT_ID
@@ -73,6 +78,12 @@ FIELDS =    {
             'MONTH': 'month',
             'MAX_ATTENDEES': 'maxAttendees',
             }
+S_DEFAULTS = {
+    "typeOfSession": [ "Default", "Topic" ],
+}
+S_FIELDS =    {
+            'typeOfSession': 'topics',
+            }
 
 CONF_GET_REQUEST = endpoints.ResourceContainer(
     message_types.VoidMessage,
@@ -83,6 +94,17 @@ CONF_POST_REQUEST = endpoints.ResourceContainer(
     ConferenceForm,
     websafeConferenceKey=messages.StringField(1),
 )
+
+SESS_GET_REQUEST = endpoints.ResourceContainer(
+    message_types.VoidMessage,
+    websafeSessionKey=messages.StringField(1),
+)
+
+SESS_POST_REQUEST = endpoints.ResourceContainer(
+    SessionForm,
+    websafeSessionKey=messages.StringField(1),
+)
+
 
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
@@ -327,6 +349,233 @@ class ConferenceApi(remote.Service):
                 conferences]
         )
 
+# - - - Session
+@endpoints.api(name='Session', version='v1', audiences=[ANDROID_AUDIENCE],
+    allowed_client_ids=[WEB_CLIENT_ID, API_EXPLORER_CLIENT_ID, ANDROID_CLIENT_ID, IOS_CLIENT_ID],
+    scopes=[EMAIL_SCOPE])
+class SessionApi(remote.Service):
+    """Session API v0.1"""
+
+# - - - Session objects - - - - - - - - - - - - - - - - -
+
+    def _copySessionToForm(self, sess, displayName):
+        """Copy relevant fields from Session to SessionForm."""
+        cf = SessionForm()
+        for field in cf.all_fields():
+            if hasattr(sess, field.name):
+                # convert Date to date string; just copy others
+                if field.name.endswith('Date'):
+                    setattr(cf, field.name, str(getattr(sess, field.name)))
+                else:
+                    setattr(cf, field.name, getattr(sess, field.name))
+            elif field.name == "websafeKey":
+                setattr(cf, field.name, sess.key.urlsafe())
+        if displayName:
+            setattr(cf, 'organizerDisplayName', displayName)
+        cf.check_initialized()
+        return cf
+
+
+    def _createSessionObject(self, request):
+        """Create or update Session object, returning SessionForm/request."""
+        # preload necessary data items
+        user = endpoints.get_current_user()
+        if not user:
+            raise endpoints.UnauthorizedException('Authorization required')
+        user_id = getUserId(user)
+
+        if not request.name:
+            raise endpoints.BadRequestException("Session 'name' field required")
+
+        # copy SessionForm/ProtoRPC Message into dict
+        data = {field.name: getattr(request, field.name) for field in request.all_fields()}
+        del data['websafeKey']
+
+        # add default values for those missing (both data model & outbound Message)
+        for df in S_DEFAULTS:
+            if data[df] in (None, []):
+                data[df] = S_DEFAULTS[df]
+                setattr(request, df, S_DEFAULTS[df])
+
+
+        if data['date']:
+            data['date'] = datetime.strptime(data['endDate'][:10], "%Y-%m-%d").date()
+
+        # generate Profile Key based on user ID and Session
+        # ID based on Profile key get Session key from ID
+        p_key = ndb.Key(Profile, user_id)
+        s_id = Session.allocate_ids(size=1, parent=p_key)[0]
+        s_key = ndb.Key(Session, s_id, parent=p_key)
+        data['key'] = s_key
+        data['organizerUserId'] = request.organizerUserId = user_id
+
+        # create Session, send email to organizer confirming
+        # creation of Session & return (modified) SessionForm
+        Session(**data).put()
+        taskqueue.add(params={'email': user.email(),
+            'SessionInfo': repr(request)},
+            url='/tasks/send_confirmation_email'
+        )
+        return request
+
+
+    @ndb.transactional()
+    def _updateSessionObject(self, request):
+        user = endpoints.get_current_user()
+        if not user:
+            raise endpoints.UnauthorizedException('Authorization required')
+        user_id = getUserId(user)
+
+        # copy SessionForm/ProtoRPC Message into dict
+        data = {field.name: getattr(request, field.name) for field in request.all_fields()}
+
+        # update existing Session
+        sess = ndb.Key(urlsafe=request.websafeSessionKey).get()
+        # check that Session exists
+        if not sess:
+            raise endpoints.NotFoundException(
+                'No Session found with key: %s' % request.websafeSessionKey)
+
+        # check that user is owner
+        if user_id != sess.organizerUserId:
+            raise endpoints.ForbiddenException(
+                'Only the owner can update the Session.')
+
+        # Not getting all the fields, so don't create a new object; just
+        # copy relevant fields from SessionForm to Session object
+        for field in request.all_fields():
+            data = getattr(request, field.name)
+            # only copy fields where we get data
+                # write to Session object
+                setattr(sess, field.name, data)
+        sess.put()
+        prof = ndb.Key(Profile, user_id).get()
+        return self._copySessionToForm(sess, getattr(prof, 'displayName'))
+
+
+    @endpoints.method(SessionForm, SessionForm, path='Session',
+            http_method='POST', name='createSession')
+    def createSession(self, request):
+        """Create new Session."""
+        return self._createSessionObject(request)
+
+
+    @endpoints.method(CONF_POST_REQUEST, SessionForm,
+            path='Session/{websafeSessionKey}',
+            http_method='PUT', name='updateSession')
+    def updateSession(self, request):
+        """Update Session w/provided fields & return w/updated info."""
+        return self._updateSessionObject(request)
+
+
+    @endpoints.method(CONF_GET_REQUEST, SessionForm,
+            path='Session/{websafeSessionKey}',
+            http_method='GET', name='getSession')
+    def getSession(self, request):
+        """Return requested Session (by websafeSessionKey)."""
+        # get Session object from request; bail if not found
+        sess = ndb.Key(urlsafe=request.websafeSessionKey).get()
+        if not sess:
+            raise endpoints.NotFoundException(
+                'No Session found with key: %s' % request.websafeSessionKey)
+        prof = sess.key.parent().get()
+        # return SessionForm
+        return self._copySessionToForm(sess, getattr(prof, 'displayName'))
+
+
+    @endpoints.method(message_types.VoidMessage, SessionForms,
+            path='getSessionsCreated',
+            http_method='POST', name='getSessionsCreated')
+    def getSessionsCreated(self, request):
+        """Return Sessions created by user."""
+        # make sure user is authed
+        user = endpoints.get_current_user()
+        if not user:
+            raise endpoints.UnauthorizedException('Authorization required')
+        user_id = getUserId(user)
+
+        # create ancestor query for all key matches for this user
+        sesss = Session.query(ancestor=ndb.Key(Profile, user_id))
+        prof = ndb.Key(Profile, user_id).get()
+        # return set of SessionForm objects per Session
+        return SessionForms(
+            items=[self._copySessionToForm(sess, getattr(prof, 'displayName')) for sess in sesss]
+        )
+
+
+    def _getQuery(self, request):
+        """Return formatted query from the submitted filters."""
+        q = Session.query()
+        inequality_filter, filters = self._formatFilters(request.filters)
+
+        # If exists, sort on inequality filter first
+        if not inequality_filter:
+            q = q.order(Session.name)
+        else:
+            q = q.order(ndb.GenericProperty(inequality_filter))
+            q = q.order(Session.name)
+
+        for filtr in filters:
+            if filtr["field"] in ["month", "maxAttendees"]:
+                filtr["value"] = int(filtr["value"])
+            formatted_query = ndb.query.FilterNode(filtr["field"], filtr["operator"], filtr["value"])
+            q = q.filter(formatted_query)
+        return q
+
+
+    def _formatFilters(self, filters):
+        """Parse, check validity and format user supplied filters."""
+        formatted_filters = []
+        inequality_field = None
+
+        for f in filters:
+            filtr = {field.name: getattr(f, field.name) for field in f.all_fields()}
+
+            try:
+                filtr["field"] = FIELDS[filtr["field"]]
+                filtr["operator"] = OPERATORS[filtr["operator"]]
+            except KeyError:
+                raise endpoints.BadRequestException("Filter contains invalid field or operator.")
+
+            # Every operation except "=" is an inequality
+            if filtr["operator"] != "=":
+                # check if inequality operation has been used in previous filters
+                # disallow the filter if inequality was performed on a different field before
+                # track the field on which the inequality operation is performed
+                if inequality_field and inequality_field != filtr["field"]:
+                    raise endpoints.BadRequestException("Inequality filter is allowed on only one field.")
+                else:
+                    inequality_field = filtr["field"]
+
+            formatted_filters.append(filtr)
+        return (inequality_field, formatted_filters)
+
+
+    @endpoints.method(SessionQueryForms, SessionForms,
+            path='querySessions',
+            http_method='POST',
+            name='querySessions')
+    def querySessions(self, request):
+        """Query for Sessions."""
+        Sessions = self._getQuery(request)
+
+        # need to fetch organiser displayName from profiles
+        # get all keys and use get_multi for speed
+        organisers = [(ndb.Key(Profile, sess.organizerUserId)) for sess in Sessions]
+        profiles = ndb.get_multi(organisers)
+
+        # put display names in a dict for easier fetching
+        names = {}
+        for profile in profiles:
+            names[profile.key.id()] = profile.displayName
+
+        # return individual SessionForm object per Session
+        return SessionForms(
+                items=[self._copySessionToForm(sess, names[sess.organizerUserId]) for sess in \
+                Sessions]
+        )
+
+
 
 # - - - Profile objects - - - - - - - - - - - - - - - - - - -
 
@@ -549,6 +798,9 @@ class ConferenceApi(remote.Service):
         return ConferenceForms(
             items=[self._copyConferenceToForm(conf, "") for conf in q]
         )
+
+
+# - - - Registration - - - - - - - - - - - - - - - - - - - -
 
 
 api = endpoints.api_server([ConferenceApi]) # register API
