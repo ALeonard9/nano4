@@ -1,4 +1,4 @@
-application: nano4-89723459374
+application: conference-central-6969
 version: 1
 runtime: python27
 api_version: 1
@@ -39,6 +39,10 @@ handlers:       # static then dynamic
 - url: /_ah/spi/.*
   script: conference.api
   secure: always
+
+# URL for set_featured_speaker task
+- url: /tasks/set_featured_speaker
+  script: main.app
 
 libraries:
 

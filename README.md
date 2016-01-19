@@ -1,4 +1,3 @@
-# nano4
 App Engine application for the Udacity training course.
 
 ## Products

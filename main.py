@@ -15,6 +15,7 @@ __author__ = 'wesc+api@google.com (Wesley Chun)'
 import webapp2
 from google.appengine.api import app_identity
 from google.appengine.api import mail
+from google.appengine.api import memcache
 from conference import ConferenceApi
 
 class SetAnnouncementHandler(webapp2.RequestHandler):
@@ -37,8 +38,26 @@ class SendConfirmationEmailHandler(webapp2.RequestHandler):
                 'conferenceInfo')
         )
 
+# Set the fetaured speaker
+class SetFeaturedSpeaker(webapp2.RedirectHandler):
+    def post(self):
+        print self.request.get('speaker')
+        memcache.set("featuredSpeaker",
+                         self.request.get('speaker') + ": " +
+                         self.request.get('name'))
+        self.response.set_status(204)
+
+# class SetFeaturedSpeakerHandler(webapp2.RequestHandler): # New Code
+#     def post(self):
+#         """Set Featured Speaker."""
+#         data = {'websafeConferenceKey': self.request.get('websafeConferenceKey'),
+#                 'speaker': self.request.get('speaker')}
+#         ConferenceApi._cacheFeaturedSpeaker(data)
+#         self.response.set_status(204)
+
 
 app = webapp2.WSGIApplication([
     ('/crons/set_announcement', SetAnnouncementHandler),
     ('/tasks/send_confirmation_email', SendConfirmationEmailHandler),
+    ('/tasks/set_featured_speaker', SetFeaturedSpeaker),
 ], debug=True)
