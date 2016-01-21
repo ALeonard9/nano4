@@ -7,6 +7,68 @@ order to use this application, you will need to sign up for an account, then cre
 ## Design choices
 In implementing the sessions, I chose to replicate much of what was used for the conferences API. Like most Kinds in App engine, we needed the ability to create and retrieve sessions. Unique to this Kind would be the association with Conference. In SQL terms it is a parent table. Datatable calls it an ancestor. The important thing is it is a 1 to many relationship. Speaker was more or less just another field for a Session. Returning sessions for a speaker is a simple query.
 
+## Additional Queries
+1. Get all Cloud Sessions. This method returns sessions containing ulta hot topic of Cloud. The Conference app can use this in a "Cloud Week" promotion. Geared towards cloud developers.
+```
+    @endpoints.method(message_types.VoidMessage, SessionForms,
+            http_method='GET', name='getCloudSessions')
+    def getCloudSessions(self, request):
+        """Returns sessions featuring a cloud highlight"""
+
+        sessions = Session.query(ndb.OR(
+            Session.highlights == 'cloud'
+            ))
+        return SessionForms(
+            items=[self._copySessionToForm(session) for session in sessions]
+        )
+
+```
+2. Get all sessions that are shorter than an hour. This would be useful for people with short attention spans. Perhaps best used for conferences that invite children under the age of 10.
+```
+    @endpoints.method(message_types.VoidMessage, SessionForms,
+            http_method='GET', name='getShortSessions')
+    def getShortSessions(self, request):
+        """Returns sessions that are 1 hour or less"""
+
+        sessions = Session.query(ndb.OR(
+            Session.duration < 60
+            ))
+        return SessionForms(
+            items=[self._copySessionToForm(session) for session in sessions]
+        )
+```
+## Query problem
+The problem with this query is that it cannot be handled with a single query.  Python cannot natively handle two inequality filters at once.
+
+## Query solution
+The query for sessions before 7pm is solved by taking the SessionForms as an input, querying ndb for a start time for less than or equal to the 24-hour formatted 7pm (19). To solve the problem above I've implement a single query that filters on sessions whose start times begin before or at 7pm. Secondarily, using a loop to iterate over the responses, I append sessions that are not workshops to the returned value.
+```
+    # Filters for sessions that occur before 7PM and are not a workshop type
+    @endpoints.method(message_types.VoidMessage, SessionForms,
+            http_method='GET', name='getBefore7PMWorkshopSessions')
+    def getBefore7PMWorkshopSessions(self, request):
+        """Returns sessions that occur before 7PM and are not a workshop"""
+
+        # First filter sessions based on time using NBD
+        sessions = Session.query(ndb.AND(
+                Session.startTime != None,
+                Session.startTime <= timed(hour=19)
+                ))
+        # Second, fileter session type using native Python since NBD cannot
+        # handle two inequality filters in one query
+        time_filter_sessions = []
+        for session in sessions:
+            if 'workshop' in session.typeOfSession:
+                continue
+            else:
+                time_filter_sessions.append(session)
+
+        return SessionForms(
+            items=[self._copySessionToForm(session) for session in time_filter_sessions]
+        )
+```
+
+
 ## Products
 - [App Engine][1]
 
