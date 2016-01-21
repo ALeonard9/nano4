@@ -1,7 +1,11 @@
 # Submission for nanodegree project 4 - Conference Organization App
 
 ## Description
-This product uses the Google App Engine to create a robust, exhaustive API for the Conference application provided by Udacity. In order to use this application, you will need to sign up for an account, then create a project. The remainin instructions are below.
+This product uses the Google App Engine to create a robust, exhaustive API for the Conference application provided by Udacity. In
+order to use this application, you will need to sign up for an account, then create a project. The remainin instructions are below.
+
+## Design choices
+In implementing the sessions, I chose to replicate much of what was used for the conferences API. Like most Kinds in App engine, we needed the ability to create and retrieve sessions. Unique to this Kind would be the association with Conference. In SQL terms it is a parent table. Datatable calls it an ancestor. The important thing is it is a 1 to many relationship. Speaker was more or less just another field for a Session. Returning sessions for a speaker is a simple query.
 
 ## Products
 - [App Engine][1]
