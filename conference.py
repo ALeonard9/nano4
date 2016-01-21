@@ -504,15 +504,15 @@ class ConferenceApi(remote.Service):
             items=[self._copySessionToForm(session) for session in sessions]
         )
 
-    # Filters for sesions that are less than 120 minutes in length for those
+    # Filters for sesions that are less than 60 minutes in length for those
     # who are impatient and can't stand the idea of sitting still too long
     @endpoints.method(message_types.VoidMessage, SessionForms,
             http_method='GET', name='getShortSessions')
     def getShortSessions(self, request):
-        """Returns sessions that are are short enough for impatient people"""
+        """Returns sessions that are 1 hour or less"""
 
         sessions = Session.query(ndb.OR(
-            Session.duration < 120
+            Session.duration < 60
             ))
         return SessionForms(
             items=[self._copySessionToForm(session) for session in sessions]
@@ -523,7 +523,7 @@ class ConferenceApi(remote.Service):
     @endpoints.method(message_types.VoidMessage, SessionForms,
             http_method='GET', name='getCloudSessions')
     def getCloudSessions(self, request):
-        """Returns sessions with a cloud highlight for those in the clouds"""
+        """Returns sessions featuring a cloud highlight"""
 
         sessions = Session.query(ndb.OR(
             Session.highlights == 'cloud'
