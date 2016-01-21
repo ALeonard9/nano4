@@ -1,4 +1,7 @@
-App Engine application for the Udacity training course.
+# Submission for nanodegree project 4 - Conference Organization App
+
+## Description
+This product uses the Google App Engine to create a robust, exhaustive API for the Conference application provided by Udacity. In order to use this application, you will need to sign up for an account, then create a project. The remainin instructions are below.
 
 ## Products
 - [App Engine][1]
