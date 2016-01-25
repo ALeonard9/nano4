@@ -47,14 +47,11 @@ class SetFeaturedSpeaker(webapp2.RedirectHandler):
                          self.request.get('name'))
         self.response.set_status(204)
 
-# class SetFeaturedSpeakerHandler(webapp2.RequestHandler): # New Code
-#     def post(self):
-#         """Set Featured Speaker."""
-#         data = {'websafeConferenceKey': self.request.get('websafeConferenceKey'),
-#                 'speaker': self.request.get('speaker')}
-#         ConferenceApi._cacheFeaturedSpeaker(data)
-#         self.response.set_status(204)
-
+class SetSpeakerHandler(webapp2.RequestHandler):
+    def get(self):
+        """Set Announcement in Memcache."""
+        ConferenceApi._cache_speaker(self.request.get('sessions'))
+        self.response.set_status(204)
 
 app = webapp2.WSGIApplication([
     ('/crons/set_announcement', SetAnnouncementHandler),
