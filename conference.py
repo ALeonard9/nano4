@@ -451,13 +451,6 @@ class ConferenceApi(remote.Service):
                 'name': sessionNames},
                 url='/tasks/set_featured_speaker')
 
-        # New Code
-        # Passing featured speaker parameters to task queue
-        # taskqueue.add(params={
-        #     'speaker': request.speaker,
-        #     'websafeConferenceKey': wsck},
-        #     url='/tasks/set_featured_speaker')
-
         return request
 
     def getSessionsBySpeaker(self, request):
