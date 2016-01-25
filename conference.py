@@ -416,42 +416,48 @@ class ConferenceApi(remote.Service):
             raise endpoints.ForbiddenException(
                 'Only owners can add sessions to their own conference.')
 
-        # copy SessionForm/ProtoRPC Message into dict
+       
+
         data = {field.name: getattr(request, field.name) for field in request.all_fields()}
-
-        # Convert string dates into date objects
-        if data['date']:
-            data['date'] = datetime.strptime(data['date'][:10], "%Y-%m-%d").date()
-
-        # Convert string times to Time objects that are independent of date
-        if data['startTime']:
-            data['startTime'] = datetime.strptime(data['startTime'][:5], "%H:%M").time()
-
-        # Use parent child relationship to generate key. These are session
-        # variables
-        p_key = ndb.Key(urlsafe=request.websafeConferenceKey)
+        wsck = data['websafeConferenceKey']
+        p_key = ndb.Key(Conference, request.websafeConferenceKey)
         c_id = Session.allocate_ids(size=1, parent=p_key)[0]
         c_key = ndb.Key(Session, c_id, parent=p_key)
+        
+        data['startTime']= datetime.strptime(data['startTime'], '%H:%M:%S').time()
+
+        data['date']= datetime.strptime(data['date'], '%Y-%m-%d').date()
+      
         data['key'] = c_key
-        data['organizerUserId'] = user_id
-        del data['websafeConferenceKey']
-        del data['websafeKey']
+        data['websafeConferenceKey'] = request.websafeConferenceKey
+        
+        speaker_name = data['speaker']  
+       
+        #Query sessions by speaker and get all of the ones that are currently in the datastore and add them 
+        #to the memcache
+        sessions_by_speaker = Session.query(ndb.AND(Session.speaker == speaker_name, Session.websafeConferenceKey == request.websafeConferenceKey)).fetch()
+        
+        speaker_sessions = []
+        
+        speaker_sessions = FEATURED_SPEAKER.format(speaker_name, ','.join([session.sessionName for session in sessions_by_speaker]))
+        
+        print speaker_sessions 
 
+        if len(sessions_by_speaker) >= 1:
+            #add the speaker and the sessions they are in into the memcache
+            self._speaker_to_memcache(speaker_sessions)
+        else:
+            print "this speaker has 0 sessions"
+            
+        #add the new session data to datastore
         Session(**data).put()
-
-        # Check and see if speaker is speaking at other sessions. If so, then
-        # capture session names and pass along with speaker to task queue
-        sessions = Session.query(Session.speaker == data['speaker'],
-            ancestor=p_key)
-        if len(list(sessions)) > 1:
-            sessionList = [session.name for session in sessions]
-            sessionNames = ' '.join(session.strip() for session in sessionList)
-            taskqueue.add(params={
-                'speaker': request.speaker,
-                'name': sessionNames},
-                url='/tasks/set_featured_speaker')
-
+ 
         return request
+    
+      def _speaker_to_memcache(self, speaker_sessions):
+        
+        #create the memcache
+        taskqueue.add(url='/task/set_speaker', params={'sessions': speaker_sessions}, method='GET')
 
     def getSessionsBySpeaker(self, request):
         """Given a speaker, return all sessions by this particular speaker, across all conferences."""
