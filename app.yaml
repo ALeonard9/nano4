@@ -40,9 +40,6 @@ handlers:       # static then dynamic
   script: conference.api
   secure: always
   
-- url: /task/set_speaker
-  script: main.app
-
 # URL for set_featured_speaker task
 - url: /tasks/set_featured_speaker
   script: main.app

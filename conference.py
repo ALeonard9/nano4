@@ -183,7 +183,7 @@ class ConferenceApi(remote.Service):
             'conferenceInfo': repr(request)},
             url='/tasks/send_confirmation_email'
         )
-        
+
         return request
 
     @ndb.transactional()
@@ -359,7 +359,7 @@ class ConferenceApi(remote.Service):
                 'No conference found with key: %s' % request.websafeConferenceKey)
 
         # Create ancestor query for all key matches for this conference
-        sessions = Session.query(ancestor=ndb.Key(urlsafe=request.websafeConferenceKey))
+        sessions = Session.query(ancestor=conf.key)
 
         # return set of SessionForm objects per Session
         return SessionForms(
@@ -382,7 +382,7 @@ class ConferenceApi(remote.Service):
                 'No conference found with key: %s' % request.websafeConferenceKey)
 
         # create ancestor query for all key matches for this conference
-        sessions = Session.query(Session.typeOfSession == typeOfSession, ancestor=ndb.Key(urlsafe=request.websafeConferenceKey))
+        sessions = Session.query(Session.typeOfSession == typeOfSession, ancestor=conf.key)
 
         # return set of SessionForm objects per Session
         return SessionForms(
@@ -404,8 +404,6 @@ class ConferenceApi(remote.Service):
 
         # Get conference and check to see if it exists
         conference = ndb.Key(urlsafe=request.websafeConferenceKey).get()
-        # Set the web safe conference key for speaker memcahce  # New Code
-        # wsck = request.websafeConferenceKey
 
         if not conference:
             raise endpoints.NotFoundException(
@@ -416,48 +414,53 @@ class ConferenceApi(remote.Service):
             raise endpoints.ForbiddenException(
                 'Only owners can add sessions to their own conference.')
 
-       
+
 
         data = {field.name: getattr(request, field.name) for field in request.all_fields()}
         wsck = data['websafeConferenceKey']
-        p_key = ndb.Key(Conference, request.websafeConferenceKey)
+        p_key =  ndb.Key(urlsafe=request.websafeConferenceKey)
         c_id = Session.allocate_ids(size=1, parent=p_key)[0]
         c_key = ndb.Key(Session, c_id, parent=p_key)
-        
-        data['startTime']= datetime.strptime(data['startTime'], '%H:%M:%S').time()
 
-        data['date']= datetime.strptime(data['date'], '%Y-%m-%d').date()
-      
+        if data['startTime']:
+            data['startTime']= datetime.strptime(data['startTime'], '%H:%M:%S').time()
+
+        if data['date']:
+            data['date']= datetime.strptime(data['date'], '%Y-%m-%d').date()
+
         data['key'] = c_key
-        data['websafeConferenceKey'] = request.websafeConferenceKey
-        
-        speaker_name = data['speaker']  
-       
-        #Query sessions by speaker and get all of the ones that are currently in the datastore and add them 
-        #to the memcache
-        sessions_by_speaker = Session.query(ndb.AND(Session.speaker == speaker_name, Session.websafeConferenceKey == request.websafeConferenceKey)).fetch()
-        
-        speaker_sessions = []
-        
-        speaker_sessions = FEATURED_SPEAKER.format(speaker_name, ','.join([session.sessionName for session in sessions_by_speaker]))
-        
-        print speaker_sessions 
+        data['organizerUserId'] = user_id
 
-        if len(sessions_by_speaker) >= 1:
-            #add the speaker and the sessions they are in into the memcache
-            self._speaker_to_memcache(speaker_sessions)
+        #add the new session data to datastore
+        del data['websafeKey']
+        del data['websafeConferenceKey']
+        Session(**data).put()
+
+        speaker_name = data['speaker']
+
+        #Query sessions by speaker and get all of the ones that are currently in the datastore and add them
+        #to the memcache
+        sessions_by_speaker = Session.query(ndb.AND (Session.speaker == speaker_name,
+         ancestor=p_key))
+
+        if len(list(sessions_by_speaker)) >= 1:
+            # speaker_sessions = []
+            #
+            # speaker_sessions = Session.query(Session.speaker == data['speaker'],
+            #     ancestor=p_key)
+            # #add the speaker and the sessions they are in into the memcache
+            # self._speaker_to_memcache(speaker_sessions)
+            sessionList = [session.name for session in sessions_by_speaker]
+            sessionNamed = ' '.join(session.strip() for session in sessionList)
+            taskqueue.add(params={
+                'speaker': request.speaker,
+                'name': sessionNames},
+                url='/tasks/set_featured_speaker'
+            )
         else:
             print "this speaker has 0 sessions"
-            
-        #add the new session data to datastore
-        Session(**data).put()
- 
+
         return request
-    
-      def _speaker_to_memcache(self, speaker_sessions):
-        
-        #create the memcache
-        taskqueue.add(url='/task/set_speaker', params={'sessions': speaker_sessions}, method='GET')
 
     def getSessionsBySpeaker(self, request):
         """Given a speaker, return all sessions by this particular speaker, across all conferences."""
@@ -569,30 +572,6 @@ class ConferenceApi(remote.Service):
 
         return StringMessage(data=memcache.get("featuredSpeaker") or "")
 
-    # New Code
-    # @staticmethod
-    # def _cacheFeaturedSpeaker(request):
-    #     """Determine if featured speaker and if so place into memcache. Uses a
-    #     task that's called each time a new session is created.
-    #     """
-    #
-    #     #  Get conference and check to see if it exists
-    #     conf = ndb.Key(urlsafe=request.websafeConferenceKey).get()
-    #     if not conf:
-    #         raise endpoints.NotFoundException(
-    #             'No conference found with key: %s' % request.websafeConferenceKey)
-    #
-    #     p_key = ndb.Key(urlsafe=request.websafeConferenceKey)
-    #
-    #     sessions = Session.query(Session.speaker == data['speaker'],
-    #         ancestor=p_key)
-    #     if len(list(sessions)) > 1:
-    #         sessionList = [session.name for session in sessions]
-    #         sessionNames = ' '.join(session.strip() for session in sessionList)
-    #         memcache.set("featuredSpeaker",
-    #                          self.request.get('speaker') + ": " +
-    #                          self.request.get('sessionNames'))
-    #         self.response.set_status(204)
 
 # - - - Profile objects - - - - - - - - - - - - - - - - - - -
 
@@ -717,6 +696,28 @@ class ConferenceApi(remote.Service):
         return SessionForms(items=[
             self._copySessionToForm(ndb.Key(urlsafe=sessionKey).get())
             for sessionKey in user.sessionWishList])
+
+    # Remove a session from a user's wishlist
+    @endpoints.method(message_types.VoidMessage, SessionForms,
+            path='removeSessionsFromWishlist', http_method='GET',
+            name='removeSessionsFromWishlist')
+    def removeSessionsFromWishlist(self, request):
+        """Query for all the sessions that the user is interested in"""
+        # make sure user is authed
+        user = endpoints.get_current_user()
+        if not user:
+            raise endpoints.UnauthorizedException('Authorization required')
+
+        # Check to make sure session exists
+        session_key = ndb.Key(urlsafe=request.sessionKey)
+        if not session_key.get():
+            raise endpoints.BadRequestException("Session could not be found")
+        user = self._getProfileFromUser()
+        if not session_key.get():
+            raise endpoints.BadRequestException("Session could not be found")
+        user.sessionWishList.remove(request.sessionKey)
+        msg = StringMessage(data="Session deleted from wishlist.")
+        return msg
 
 
 # - - - Announcements - - - - - - - - - - - - - - - - - - - -
