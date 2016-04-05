@@ -38,14 +38,33 @@ class SendConfirmationEmailHandler(webapp2.RequestHandler):
                 'conferenceInfo')
         )
 
-# Set the fetaured speaker
-class SetFeaturedSpeaker(webapp2.RedirectHandler):
+class SetFeaturedSpeaker(webapp2.RequestHandler):
     def post(self):
-        print self.request.get('speaker')
-        memcache.set("featuredSpeaker",
-                         self.request.get('speaker') + ": " +
-                         self.request.get('name'))
-        self.response.set_status(204)
+        """ Features the speaker and session names."""
+        speakerName = self.request.get('speaker')
+        conferenceName = self.request.get('conferenceName')
+        conferenceKey = self.request.get('conferenceKey')
+        conf = ndb.Key(urlsafe=conferenceKey)
+        sessions = Session.query(ancestor=conf).filter(Session.speaker == speakerName)
+        print(sessions)
+        if sessions.count() > 1:
+            print("Inserting on cache.")
+            displayedMessage = "Featured speaker: {0} Conference:  {1} " \
+                               "Sessions: " \
+                               " {2}".format(speakerName,
+                                             conferenceName,
+                                             ",".join([str(session.name) for session in sessions]))
+            memcache.set(MEMCACHE_FEATURED_SPEAKER_KEY, displayedMessage)
+
+
+# Set the fetaured speaker
+# class SetFeaturedSpeaker(webapp2.RedirectHandler):
+#     def post(self):
+#         print self.request.get('speaker')
+#         memcache.set("featuredSpeaker",
+#                          self.request.get('speaker') + ": " +
+#                          self.request.get('name'))
+#         self.response.set_status(204)
 
 app = webapp2.WSGIApplication([
     ('/crons/set_announcement', SetAnnouncementHandler),

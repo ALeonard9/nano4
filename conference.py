@@ -106,6 +106,12 @@ ADD_SESSION_TO_WISHLIST_REQUEST=endpoints.ResourceContainer(
     sessionKey=messages.StringField(1,required=True)
 )
 
+REMOVE_SESSION_TO_WISHLIST_REQUEST=endpoints.ResourceContainer(
+    message_types.VoidMessage,
+    sessionKey=messages.StringField(1,required=True)
+)
+
+
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 @endpoints.api(name='conference', version='v1',
@@ -435,31 +441,13 @@ class ConferenceApi(remote.Service):
         del data['websafeKey']
         del data['websafeConferenceKey']
         Session(**data).put()
-
-        speaker_name = data['speaker']
-
-        #Query sessions by speaker and get all of the ones that are currently in the datastore and add them
-        #to the memcache
-        sessions_by_speaker = Session.query(ndb.AND (Session.speaker == speaker_name,
-         ancestor=p_key))
-
-        if len(list(sessions_by_speaker)) >= 1:
-            # speaker_sessions = []
-            #
-            # speaker_sessions = Session.query(Session.speaker == data['speaker'],
-            #     ancestor=p_key)
-            # #add the speaker and the sessions they are in into the memcache
-            # self._speaker_to_memcache(speaker_sessions)
-            sessionList = [session.name for session in sessions_by_speaker]
-            sessionNamed = ' '.join(session.strip() for session in sessionList)
-            taskqueue.add(params={
+        taskqueue.add(params={
                 'speaker': request.speaker,
-                'name': sessionNames},
+                'conferenceName': conference.name,
+                'conferenceKey': request.websafeConferenceKey
+                      },
                 url='/tasks/set_featured_speaker'
             )
-        else:
-            print "this speaker has 0 sessions"
-
         return request
 
     def getSessionsBySpeaker(self, request):
@@ -698,7 +686,7 @@ class ConferenceApi(remote.Service):
             for sessionKey in user.sessionWishList])
 
     # Remove a session from a user's wishlist
-    @endpoints.method(message_types.VoidMessage, SessionForms,
+    @endpoints.method(REMOVE_SESSION_TO_WISHLIST_REQUEST, SessionForms,
             path='removeSessionsFromWishlist', http_method='GET',
             name='removeSessionsFromWishlist')
     def removeSessionsFromWishlist(self, request):
