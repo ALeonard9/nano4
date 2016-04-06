@@ -437,27 +437,17 @@ class ConferenceApi(remote.Service):
         data['key'] = c_key
         data['organizerUserId'] = user_id
 
-        #add the new session data to datastore
+        # add the new session data to datastore
         del data['websafeKey']
         del data['websafeConferenceKey']
         Session(**data).put()
         taskqueue.add(params={
                 'speaker': request.speaker,
-                'conferenceName': conference.name,
                 'conferenceKey': request.websafeConferenceKey
                       },
                 url='/tasks/set_featured_speaker'
             )
         return request
-
-    def getSessionsBySpeaker(self, request):
-        """Given a speaker, return all sessions by this particular speaker, across all conferences."""
-        data = {field.name: getattr(request, field.name) for field in request.all_fields()}
-        speaker = data['speaker']
-        sessions = Session.query(Session.speaker == speaker)
-        return SessionForms(
-            items=[self._copySessionToForm(session) for session in sessions]
-        )
 
     def _copySessionToForm(self, session):
         """Copy fields into SessionForm."""
@@ -686,7 +676,7 @@ class ConferenceApi(remote.Service):
             for sessionKey in user.sessionWishList])
 
     # Remove a session from a user's wishlist
-    @endpoints.method(REMOVE_SESSION_TO_WISHLIST_REQUEST, SessionForms,
+    @endpoints.method(REMOVE_SESSION_TO_WISHLIST_REQUEST, StringMessage,
             path='removeSessionsFromWishlist', http_method='GET',
             name='removeSessionsFromWishlist')
     def removeSessionsFromWishlist(self, request):
@@ -736,13 +726,28 @@ class ConferenceApi(remote.Service):
 
         return announcement
 
+    @staticmethod
+    def _cacheFeaturedSpeaker(speakerName, conferenceKey):
+        """
+        Set the featured speaker if they have more than one session in a conference.
+        """
+        conf = ndb.Key(urlsafe=conferenceKey)
+        sessions = Session.query(ancestor=conf).filter(Session.speaker == speakerName)
+        if sessions.count() > 1:
+            print("Inserting on cache.")
+            displayedMessage = "Featured speaker: {0} " \
+                               "Sessions: " \
+                               " {1}".format(speakerName,
+                                ",".join([str(session.name) for session in sessions]))
+            memcache.set(MEMCACHE_FEATURED_SPEAKER_KEY, displayedMessage)
+
+        return displayedMessage
+
     @endpoints.method(message_types.VoidMessage, StringMessage,
             path='conference/announcement/get',
             http_method='GET', name='getAnnouncement')
     def getAnnouncement(self, request):
         """Return Announcement from memcache."""
-        # TODO 1
-        # return an existing announcement from Memcache or an empty string.
         announcement = memcache.get(MEMCACHE_ANNOUNCEMENTS_KEY)
         if not announcement:
             announcement = ""
