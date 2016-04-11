@@ -48,6 +48,7 @@ from settings import WEB_CLIENT_ID
 EMAIL_SCOPE = endpoints.EMAIL_SCOPE
 API_EXPLORER_CLIENT_ID = endpoints.API_EXPLORER_CLIENT_ID
 MEMCACHE_ANNOUNCEMENTS_KEY = "RECENT_ANNOUNCEMENTS"
+MEMCACHE_FEATURED_SPEAKER_KEY = "FEATURED_SPEAKER"
 
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
@@ -695,6 +696,7 @@ class ConferenceApi(remote.Service):
             raise endpoints.BadRequestException("Session could not be found")
         user.sessionWishList.remove(request.sessionKey)
         msg = StringMessage(data="Session deleted from wishlist.")
+        user.put()
         return msg
 
 
