@@ -1,3 +1,5 @@
+# FOR REFERENCE ONLY
+
 # Submission for nanodegree project 4 - Conference Organization App
 
 ## Description
